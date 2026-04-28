@@ -58,7 +58,7 @@ company_master = pd.DataFrame([
 with st.sidebar:
     st.header("Universe & parameters")
 
-    # We only need the exchange selector to help the user browse; they can still mix later via manual tickers
+    # Exchange just for browsing; user can still mix via manual tickers
     selected_exchange = st.selectbox(
         "Browse companies by exchange",
         sorted(company_master["Exchange"].unique())
@@ -103,7 +103,6 @@ with st.sidebar:
 
 # -------------------- BUILD TICKER + CCY LISTS --------------------
 
-# From the selected exchange/companies
 selected_df = company_master[
     (company_master["Exchange"] == selected_exchange) &
     (company_master["Company"].isin(selected_companies))
@@ -112,7 +111,7 @@ selected_df = company_master[
 auto_tickers = selected_df["Ticker"].tolist()
 auto_ccy     = selected_df["Currency"].tolist()
 
-# Manual tickers – assume USD by default, you can extend by asking user for currency
+# Manual tickers – assume USD by default; you can extend by asking user for currency
 manual_list = [t.strip().upper() for t in manual_tickers.split(",") if t.strip()]
 manual_ccy  = [BASE_CCY] * len(manual_list)
 
@@ -141,7 +140,7 @@ def get_fx_series(local_ccy_list, start, end, base_ccy=BASE_CCY):
     if not unique_ccy:
         return pd.DataFrame()
 
-    fx_symbols = {ccy: f"{base_ccy}{ccy}=X" for ccy in unique_ccy}  # e.g. USDINR=X, USDGBP=X
+    fx_symbols = {ccy: f"{base_ccy}{ccy}=X" for ccy in unique_ccy}
 
     data_fx = yf.download(
         list(fx_symbols.values()),
@@ -254,7 +253,7 @@ if run_button:
 
     fx_df = get_fx_series(local_ccy, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
 
-    # Build USD price DataFrame
+    # Build base-currency price DataFrame
     data_base = pd.DataFrame(index=data_local.index)
 
     for i, t in enumerate(available_tickers):
@@ -265,10 +264,13 @@ if run_button:
             data_base[t] = series_local  # already in USD
         else:
             if fx_df.empty or ccy not in fx_df.columns:
-                st.error(f"Missing FX data for {ccy}. Cannot convert {t} to {BASE_CCY}.")
+                st.error(
+                    f"Missing FX data for {ccy}. Cannot convert ticker {t} to {BASE_CCY}.\n"
+                    f"Check that Yahoo Finance has the pair {BASE_CCY}{ccy}=X."
+                )
                 st.stop()
             # Align FX series to price dates
-            fx_series = fx_df[ccy].reindex(series_local.index).fillna(method="ffill").fillna(method="bfill")
+            fx_series = fx_df[ccy].reindex(series_local.index).ffill().bfill()
             # price in base = local / (local units per base)
             data_base[t] = series_local / fx_series
 
@@ -291,7 +293,7 @@ if run_button:
     sigma = np.sqrt(np.diag(cov))
 
     stats_df = pd.DataFrame({
-        "Ticker": available_tickers,
+        "Ticker":   available_tickers,
         "Currency": local_ccy,
         "Exp Return (base)": mu.values,
         "Volatility (base)": sigma,
@@ -331,7 +333,6 @@ if run_button:
         weights_vec = cov_inv @ (Lambda * mu_vec + Gamma * ones)
         weights = weights_vec.flatten()
     else:
-        # Max Sharpe-like direction, then normalize to sum to 1
         raw = cov_inv @ mu_vec
         weights = raw.flatten() / raw.sum()
 
@@ -348,7 +349,6 @@ if run_button:
         use_container_width=True
     )
 
-    # Portfolio metrics
     portfolio_return = float(weights @ mu.values)
     portfolio_vol    = float(np.sqrt(weights @ cov_mat @ weights))
 
@@ -360,7 +360,7 @@ if run_button:
 
     st.subheader("4. Execution prices and share sizing (local currencies)")
 
-    execution_date = data_local.index[-1]  # last date in local price data
+    execution_date = data_local.index[-1]
     prices_exec_local = data_local.loc[execution_date]
 
     # Last FX rates for conversion at execution date
@@ -372,7 +372,6 @@ if run_button:
     # Capital per asset in base currency
     amount_per_asset_base = weights * total_capital_base
 
-    # Convert to local currency & compute shares
     alloc_rows = []
     for i, t in enumerate(available_tickers):
         ccy = local_ccy[i]
@@ -388,18 +387,17 @@ if run_button:
             fx_rate = float(fx_exec[ccy])  # local per 1 base
             capital_local = capital_base * fx_rate
 
-        # Long if weight>0, short if weight<0
         shares = int(np.floor(abs(capital_local) / price_local)) * (1 if capital_local >= 0 else -1)
 
         alloc_rows.append({
-            "Ticker":            t,
-            "Currency":          ccy,
-            "Weight":            weights[i],
-            "Weight %":          weights[i] * 100,
-            f"Capital ({BASE_CCY})": capital_base,
+            "Ticker":                 t,
+            "Currency":               ccy,
+            "Weight":                 weights[i],
+            "Weight %":               weights[i] * 100,
+            f"Capital ({BASE_CCY})":  capital_base,
             f"Capital ({ccy})":       capital_local,
             "Execution Price (local)": price_local,
-            "Shares":             shares,
+            "Shares":                 shares,
         })
 
     alloc_df = pd.DataFrame(alloc_rows)
@@ -410,9 +408,9 @@ if run_button:
             "Weight": "{:.4f}",
             "Weight %": "{:.2f}",
             f"Capital ({BASE_CCY})": "{:.2f}",
-            "Capital (INR)":         "{:.2f}",
-            "Capital (GBP)":         "{:.2f}",
-            "Capital (CAD)":         "{:.2f}",
+            "Capital (INR)": "{:.2f}",
+            "Capital (GBP)": "{:.2f}",
+            "Capital (CAD)": "{:.2f}",
             "Execution Price (local)": "{:.2f}",
             "Shares": "{:d}",
         }),
